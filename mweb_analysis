@@ -1,0 +1,283 @@
+/* Create table of all sessions since September 1st */
+
+drop table if exists playground.mweb_sessions;
+create table playground.mweb_sessions as
+select
+    session_ID
+  , user_ID
+  , time as session_time
+  , device_type
+  , referrer
+  , landing_page
+  , search_keyword
+  , utm_source
+  , utm_campaign
+  , utm_medium
+  , utm_term
+from heap.sessions
+where time::date between '2019-01-07' and '2020-02-23'
+and landing_page not like '%app%' -- don't want people landing in the app
+and landing_page not like '%support.joinhomebase%' -- don't want people landing on the support site
+and landing_page like 'joinhomebase.com/%'
+;
+
+select
+    session_time::date as session_date
+  , count(distinct session_ID) as sessions
+from playground.mweb_sessions
+group by 1
+order by 1;
+
+select max(time) from heap.pageviews;
+
+select count(*) from playground.mweb_sessions; -- look at session count
+select count(distinct user_ID) from playground.mweb_sessions;  -- check distinct user count
+
+/* Create a table of all users from those sessions */
+
+drop table if exists playground.mweb_users;
+create table playground.mweb_users as
+select
+    user_ID
+  , joindate
+from heap.users
+where user_ID in (select distinct user_ID from playground.mweb_sessions)
+;
+
+select count(distinct user_ID) from playground.mweb_sessions;  -- make sure there's no user dropoff
+select count(distinct user_ID) from playground.mweb_users; -- make sure there's no user dropoff
+
+/* Join back to see if it was the user's first session */
+
+drop table if exists playground.mweb_sessions_user;
+create table playground.mweb_sessions_user as
+select
+    a.*
+  , case when b.joindate < a.session_time then 'Returning' else 'New' end as visitor_type
+from playground.mweb_sessions a
+join playground.mweb_users b
+on a.user_ID = b.user_ID
+;
+
+/* Look at the distribution of new and returning visitor traffic */
+
+select
+    visitor_type
+  , count(distinct session_ID) as sessions
+  , count(distinct user_ID) as users
+from playground.mweb_sessions_user
+group by 1;
+
+/* Get funnel progression info on the session */
+
+drop table if exists playground.mweb_sessions_info;
+create table playground.mweb_sessions_info as
+select
+    a.*
+  , max(case when b.path = '/onboarding/sign_up' then 1 else 0 end) as entered_onboarding
+  , max(case when b.path = '/onboarding/sign_up/owner_account' then 1 else 0 end) as clicked_owner
+  , max(case when b.path = '/onboarding/sign_up/company' then 1 else 0 end) as step_two
+  , max(case when b.path = '/onboarding/sign_up/employees' then 1 else 0 end) as step_three
+  , max(case when b.path = '/onboarding/sign_up/success' then 1
+             when b.path = '/onboarding/questions' then 1
+             else 0 end) as completed_signup
+  , max(case when b.path = '/onboarding/sign_up/success' then b.company_ID
+             when b.path = '/onboarding/questions' then b.company_ID end) as company_ID
+from playground.mweb_sessions_user a
+join heap.pageviews b
+on a.session_ID = b.session_ID
+group by 1,2,3,4,5,6,7,8,9,10,11,12
+;
+
+/* Cut data by paid vs. organic, visitor type, device, and day */
+
+select
+    case
+        when utm_source in ('bing', 'google') and landing_page like '%.com/free%' then 'Paid-Search'
+        when utm_source in 
+            ('fsb', 'yelp', 'accordant', 'capterra', 'affiliate', 'facebook', 'quickbooks') then 'Paid-Other'
+        when landing_page like '%.com/free%' then 'Paid-Other'
+        when utm_medium = 'cpc' then 'Paid-Other'
+        else 'Organic' end as paid_flag
+  , visitor_type
+  , device_type
+  , case
+        when landing_page like '%features%' then 'Features'
+        when landing_page like '%pricing%' then 'Features'
+        when landing_page like '%blog%' then 'Blog'
+        when landing_page like '%.com/free%' then 'Paid'
+        when landing_page in ('joinhomebase.com/', 'joinhomebase.com/h9/') then 'Homepage'
+        else 'Other' end as page_type
+  , session_time::date as session_date
+  , count(*) as sessions
+  , count(distinct user_ID) as users
+  , sum(entered_onboarding) as entered_onboarding
+  , sum(clicked_owner) as clicked_owner
+  , sum(step_two) as company_page
+  , sum(step_three) as employees_page
+  , sum(completed_signup) as completed_signup
+from playground.mweb_sessions_info
+where session_date >= '2019-01-07'
+group by 1,2,3,4,5
+order by session_date
+;
+
+/* Investigation */
+
+select count(distinct session_ID) from playground.mweb_sessions_info
+where landing_page = 'joinhomebase.com/h9/'
+;
+
+select
+    landing_page
+  , count(*) as sessions
+  , sum(entered_onboarding) as entered_onboarding
+  , sum(clicked_owner) clicked_owner
+  , sum(step_two) as step_two
+  , sum(step_three) as step_three
+  , sum(completed_signup) as completed_signup
+from playground.mweb_sessions_info
+where session_time::date >= '2019-01-01'
+group by 1;
+    
+    
+select 
+    session_time::date as session_date
+  , count(*) as sessions
+  , sum(completed_signup)
+from playground.mweb_sessions_info
+where landing_page like '%food-bev%'
+and session_time::date >= '2019-09-01'
+and utm_source = 'yelp'
+group by 1
+order by 1
+;
+
+select b.* 
+from public.locations b
+join public.companies a
+on a.company_ID = b.company_ID
+where lower(b.city) in ('portsmouth', 'kittery', 'park city', 'york')
+and lower(b.state) in ('nh', 'me', 'ut')
+and b.tier_id > 1
+;
+
+select
+    extract(month from session_time) as session_month
+  , count(distinct session_ID) as sessions
+  , sum(completed_signup) as completed_signup
+from playground.mweb_sessions_info
+group by 1
+order by 1;
+
+/* Activation rates ch_lvl_2 */
+
+select
+    a.created_at::date as created_date
+  , a.channel_lvl_2
+  , a.channel_lvl_3
+  , count(distinct a.company_ID) as companies
+  , count(distinct 
+            case when a.first_activity_ts is not null 
+            and datediff('day', a.created_at, a.first_activity_ts) <= 1 
+            then a.company_ID end) as d1_activations_old
+  , sum(active_1d1) as d1_activations_new
+from public.companies a
+left join public.basisone_activation_metrics b
+on a.company_ID = b.company_ID
+where a.created_at::date >= '2019-09-02'
+group by 1,2,3
+;
+
+select * from public.locations
+where created_at::date >= '2019-11-10' and utm_source = 'facebook'
+;
+
+select * from public.locations
+where lower(city) = 'kittery'
+and lower(state) = 'me'
+and active_now = 'true'
+;
+
+select * from public.companies where company_ID = 655774;
+
+
+select
+    created_at::date as created_date
+  , case when channel_lvl_2 = 'wom' then 1 else 0 end as wom_flag
+  , count(*) as signups
+from public.companies
+where created_at::date >= '2019-09-02'
+group by 1,2
+;
+
+select *
+from public.companies
+where channel_lvl_2 = 'seo'
+and channel_lvl_3 = 'facebook'
+and created_at::date >= '2019-12-09'
+;
+
+select
+    device_type
+  , count(distinct session_ID) as sessions
+from heap.sessions
+where landing_page like '%/free%'
+and time::date >= '2019-12-01'
+group by 1;
+
+select * from heap.pageviews
+where path = '/free-online-time-clock-5/'
+;
+
+select
+    created_at::date as created_date
+  , count(distinct company_ID) as companies
+from public.companies
+where (lower(name) like '%accounting%'
+or lower(name) like '%tax%'
+or lower(name) like '%accountant%')
+and created_at::date >= '2019-09-01'
+group by 1
+order by 1
+;
+
+select
+    a.company_ID
+  , a.name as company_name
+  , a.created_at::date as created_date
+  , a.biz_type_google
+  , b.location_ID
+  , b.name as location_name
+  , c.first_name
+  , c.last_name
+  , c.email
+from public.companies a
+join public.locations b
+on a.company_ID = b.company_ID
+join public.users c
+on b.owner_ID = c.user_ID
+where (lower(a.name) like '%accounting%'
+or lower(a.name) like '%tax %'
+or lower(a.name) like '%accountant%'
+or lower(a.name) like '%bookkeep%')
+and a.created_at::date >= '2019-09-01'
+;
+
+select 
+    created_at::date as created_date
+  , count(*) as companies
+from public.companies
+where channel_lvl_3 = 'capterra'
+and created_at::date >= '2019-12-01'
+group by 1
+order by 1;
+
+select
+    created_at::date as created_date
+  , count(*) as signups
+from public.companies
+where created_at::date between '2019-01-01' and '2019-01-31'
+and channel_lvl_2 = 'sem'
+group by 1
+order by 1;
