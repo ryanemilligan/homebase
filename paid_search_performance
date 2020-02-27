@@ -1,0 +1,210 @@
+/* Daily SEM View */
+
+select
+    created_at::date as created_date
+  , case when channel_lvl_2 = 'sem' and channel_lvl_3 = 'google' then 'Google Paid Search'
+         when channel_lvl_2 = 'appstore' and channel_lvl_3 = 'android' then 'Android'
+         when channel_lvl_2 = 'appstore' and channel_lvl_3 = 'ios' then 'Apple Search Ads'
+         when channel_lvl_2 = 'sem' and channel_lvl_3 = 'bing' then 'Bing'
+         else 'Other SEM/Appstore' end as channel
+  , count(distinct company_ID) as signups
+from public.companies
+where created_at::date between '2019-01-07' and '2020-02-25'
+and ((channel_lvl_2 in ('sem', 'marketing_partner'))
+     OR
+     (channel_lvl_1 = 'mobile' and channel_paid_flag = 'paid'))
+group by 1,2
+order by created_at::date;
+
+/* Add in activation/paying stuff */
+
+select
+    a.created_at::date as created_date
+  , case when a.channel_lvl_2 = 'sem' and a.channel_lvl_3 = 'google' then 'Google Paid Search'
+         when a.channel_lvl_2 = 'appstore' and a.channel_lvl_3 = 'android' then 'Android'
+         when a.channel_lvl_2 = 'appstore' and a.channel_lvl_3 = 'ios' then 'Apple Search Ads'
+         when a.channel_lvl_2 = 'sem' and a.channel_lvl_3 = 'bing' then 'Bing'
+         else 'Other SEM/Appstore' end as channel
+  , count(distinct a.company_ID) as signups
+  , count(distinct case when datediff('day', a.created_at::date, a.first_activity_ts::date) 
+            <= 7 then a.company_ID end) as d1_to_7_activations_old
+  , count(distinct case when c.active_2_visits_by_d7 = 1 then a.company_ID end) as active_2d7
+from public.companies a
+join public.active_paying_history b
+on a.company_ID = b.company_ID
+left join public.activation_metrics c
+on a.company_ID = c.company_ID
+where a.created_at::date between '2019-01-07' and '2020-02-18'
+and ((channel_lvl_2 in ('sem', 'marketing_partner'))
+     OR
+     (channel_lvl_1 = 'mobile' and channel_paid_flag = 'paid'))
+group by 1,2
+order by a.created_at::date
+;
+
+/* Look at mobile overall signups/activations */
+
+select
+    a.created_at::date as created_date
+  , case 
+         when a.channel_lvl_3 = 'android' then 'Android'
+         when a.channel_lvl_3 = 'ios' then 'Apple'
+         else 'Other' end as channel
+  , count(distinct a.company_ID) as signups
+  , count(distinct case when datediff('day', a.created_at::date, a.first_activity_ts::date) 
+            <= 7 then a.company_ID end) as d1_to_7_activations_old
+  , count(distinct case when c.active_2_visits_by_d7 = 1 then a.company_ID end) as active_2d7
+from public.companies a
+join public.active_paying_history b
+on a.company_ID = b.company_ID
+left join public.activation_metrics c
+on a.company_ID = c.company_ID
+where a.created_at::date between '2019-01-07' and '2020-02-09'
+and channel_lvl_1 = 'mobile'
+and channel_lvl_3 in ('android', 'ios')
+group by 1,2
+order by a.created_at::date
+;
+
+/* Give a monthly overall view for Google + Bing */
+
+select
+    extract(year from a.created_at) as created_year
+  , extract(month from a.created_at) as created_month
+  , count(distinct a.company_ID) as signups
+  , count(distinct case when 
+        datediff('day', a.created_at::date, a.first_activity_ts::date) <= 7 then a.company_ID end) as d7_actives
+  , count(distinct case when 
+        datediff('day', a.created_at::date, b.first_2d7_active_date::date) <= 7 then a.company_ID end) as d7_2d7
+from public.companies a
+left join public.activation_metrics b
+on a.company_ID = b.company_ID
+where a.created_at::date between '2018-01-01' and '2020-02-15'
+and channel_lvl_2 in ('sem', 'marketing_partner')
+group by 1,2
+order by 1,2
+;
+
+/* Give a monthly overall view for Google + Bing */
+
+select
+    a.created_at::date as created_date
+  , count(distinct a.company_ID) as signups
+  , count(distinct case when 
+        datediff('day', a.created_at::date, a.first_activity_ts::date) <= 7 then a.company_ID end) as d7_actives
+  , count(distinct case when 
+        datediff('day', a.created_at::date, b.first_2d7_active_date::date) <= 7 then a.company_ID end) as d7_2d7
+  , count(distinct c.company_ID) as paying_d30
+from public.companies a
+left join public.activation_metrics b
+on a.company_ID = b.company_ID
+left join public.active_paying_history c
+on a.company_ID = c.company_ID
+and c.paying = 1
+and c.company_age between 0 and 30
+where a.created_at::date between '2018-01-01' and '2020-02-14'
+and channel_lvl_2 in ('sem', 'marketing_partner')
+group by 1
+order by 1
+;
+
+
+select * from public.companies
+where channel_lvl_3 = 'cpc'
+and created_at::date >= '2019-12-01'
+;
+
+
+/* Look at keyword driven signups from our end */
+
+select 
+    utm_campaign
+  , created_at::date as signup_date
+  , count(distinct company_ID) as signups
+  , count(distinct )
+from public.companies
+where utm_source = 'google'
+and channel = 'ad'
+and created_at::date between '2019-09-01' and '2020-02-18'
+group by 1,2
+order by 2
+;
+
+select distinct utm_campaign
+from public.companies
+where utm_source = 'google'
+and channel = 'ad'
+and created_at::date between '2018-01-01' and '2020-02-18'
+order by 1;
+
+select
+    created_at::date as created_date
+  , count(distinct company_ID) as signups
+  , count(distinct case when first_activity_ts is not null then company_ID end) as activations
+from public.companies
+where utm_source = 'google'
+and channel = 'ad'
+and created_at::date between '2018-01-01' and '2020-02-19'
+and lower(utm_campaign) not like ('%brand%')
+and lower(utm_campaign) not like ('%homebase%')
+group by 1
+order by 1
+;
+
+select
+    created_at::date as created_date
+  , count(distinct company_ID) as signups
+from public.companies
+where channel_lvl_2 = 'seo'
+and created_at::date between '2018-01-01' and '2020-02-19'
+group by 1
+order by 1;
+
+select
+    extract(month from created_at) as created_month
+  , case when channel_lvl_3 not in ('google', 'bing') then 'other' else channel_lvl_3 end as channel_lvl_3
+  , count(distinct company_ID) as cos
+  , count(distinct case when datediff('day', created_at::date, first_activity_ts::date) <= 7 then company_ID end) as aco_7d
+from public.companies
+where created_at::date between '2020-01-01' and '2020-02-12'
+and channel_lvl_2 in ('marketing_partner', 'sem')
+group by 1,2
+;
+
+select * from public.companies where channel_lvl_2 = 'wom' limit 10;
+
+
+
+
+/* Look at mobile by channel */
+
+select
+    channel_lvl_3
+  , channel_paid_flag
+  , created_at::date as created_date
+  , count(distinct company_ID) as companies
+from public.companies
+where channel_lvl_2 = 'appstore'
+and created_at::date between '2019-01-01' and '2020-02-23'
+and channel_lvl_3 in ('android', 'ios')
+group by 1,2,3
+order by 3,1,2;
+
+/* Look at signups by month for projections */
+
+select
+    extract(year from created_at::date) as created_year 
+  , extract(month from created_at::date) as created_month
+  , case 
+        when channel_lvl_3 not in ('google', 'bing', 'fsb', 'capterra') then 'other'
+        else channel_lvl_3 end as channel_lvl_3
+  , count(distinct company_ID) as companies
+  , count(distinct case when datediff('day', created_at, first_activity_ts) 
+        <= 7 and created_at::date <= '2020-02-11' then company_ID end) as active_d7_companies
+from public.companies
+where created_at::date between '2018-01-01' and '2020-02-18'
+and channel_lvl_2 in ('sem', 'marketing_partner')
+group by 1,2,3
+order by 1,2,3
+;
+
