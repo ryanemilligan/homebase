@@ -1,0 +1,55 @@
+DROP TABLE IF EXISTS playground.LTVpull_RM_monthly;
+CREATE TABLE playground.LTVpull_RM_monthly as
+SELECT 
+    extract(month from companies_v2.created_at) as month_created
+  , companies_v2.channel_paid_flag as paid_flag
+  , companies_v2.value_segment_day_0
+  , case
+        when companies_v2.channel_lvl_2 = 'clover' then 'Clover'
+        when companies_v2.channel_lvl_1 = 'partner' 
+            and companies_v2.channel_lvl_2 not in ('clover') 
+            then 'Other_Partner'
+        when companies_v2.channel_lvl_2 = 'sem' then 'SEM'
+        when companies_v2.channel_lvl_1 = 'mobile' 
+            and companies_v2.channel_paid_flag in ('organic') then 'Mobile_Organic'
+        when companies_v2.channel_lvl_1 = 'mobile' 
+            and companies_v2.channel_paid_flag in ('paid') 
+            and companies_v2.channel_lvl_3 = 'ios' 
+            then 'Mobile_Paid_ios'
+        when companies_v2.channel_lvl_1 = 'mobile' 
+            and companies_v2.channel_paid_flag in ('paid') 
+            and companies_v2.channel_lvl_3 = 'android' 
+            then 'Mobile_Paid_android'
+        when companies_v2.channel_lvl_2 = 'seo' then 'SEO'
+        else 'WOM' end as channel_granular
+  , active_paying_history_v2.company_age / 30 AS months_since_signup
+  , COUNT(DISTINCT active_paying_history_v2.company_id ) AS total_companies
+  , COUNT(DISTINCT CASE WHEN active_paying_history_v2.paying = 1 THEN active_paying_history_v2.company_id END ) AS paying_companies
+  , COUNT(DISTINCT active_paying_history_v2.location_id ) AS total_locations   
+  , COUNT(DISTINCT CASE WHEN active_paying_history_v2.paying = 1 THEN active_paying_history_v2.location_id END ) AS paying_locations
+  , COALESCE(SUM(active_paying_history_v2.price ), 0) AS MRR
+FROM public.active_paying_history  AS active_paying_history_v2
+LEFT JOIN public.companies  AS companies_v2 ON active_paying_history_v2.company_id = companies_v2.company_id 
+WHERE 
+    (active_paying_history_v2.company_age / 30 > 0) 
+    AND (CASE WHEN (active_paying_history_v2.company_age / 30)
+        =round((active_paying_history_v2.company_age / 30)) then True else False end) 
+    AND ((((companies_v2.created_at ) >= (TIMESTAMP '2016-01-01') 
+    AND (companies_v2.created_at ) < (TIMESTAMP '2019-11-30')))) 
+GROUP BY 1,2,3,4,5
+;
+
+select 
+    month_created
+  , paid_flag
+  , channel_granular
+  , value_segment_day_0
+  , months_since_signup
+  , total_companies
+  , paying_companies
+  , total_locations
+  , paying_locations
+  , MRR
+from playground.LTVpull_RM_monthly
+where (month_created = 2016 and months_since_signup >= 20) or (month_created != 2016)
+;
